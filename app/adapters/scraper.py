@@ -5,7 +5,7 @@ import pandas as pd
 from io import BytesIO
 import os
 from playwright.sync_api import sync_playwright
-#import requests
+import requests
 
 class IDigemidScraper(Protocol):
     """Protocolo (interfaz estructural) para el scraper."""
