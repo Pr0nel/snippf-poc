@@ -1,13 +1,10 @@
 # app/adapters/postgres_repo.py
 from decimal import Decimal
 from typing import List, Optional
-
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-
 from app.domain.entities import Medicamento
 from app.domain.repositories import IMedicamentoRepo
-
 
 class PostgresMedicamentoRepo(IMedicamentoRepo):
     """
