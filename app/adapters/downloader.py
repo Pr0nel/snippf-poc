@@ -2,104 +2,158 @@
 from abc import ABC, abstractmethod
 from app.config import ScraperConfig
 import pandas as pd
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError, sync_playwright
 from io import BytesIO
 import requests
 import os
 
 class IDownloader(ABC):
     @abstractmethod
-    def download_excel(self) -> pd.DataFrame:
+    def download_excels(self, product_name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Descarga el catálogo general y un Excel de producto específico.
+        Retorna una tupla con los DataFrames.
+        """
         ...
 
 class PlaywrightDownloader(IDownloader):
     def __init__(self, cfg: ScraperConfig):
         self.cfg = cfg
 
-    def download_excel(self) -> pd.DataFrame:
+    def _get_page_and_handle_ads(self, playwright):
+        """Método privado para inicializar la página y cerrar anuncios."""
+        browser = playwright.chromium.launch(headless=self.cfg.playwright['headless'])
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 720}
+        )
+        page = context.new_page()
+        page.goto(self.cfg.playwright['url'], timeout=30000)
+        # Esperar a que la página cargue completamente
+        try:
+            page.wait_for_load_state("networkidle", timeout=15000) # Espera hasta que no haya peticiones por >1s
+            print("Página completamente cargada.")
+        except Exception as e:
+            print(f"Advertencia: La página no alcanzó 'networkidle': {e}")
+        # Cerrar anuncios de la página. OJO: *ACTUALIZAR SELECTORES SI CAMBIA LOS ANUNCIOS*
+        selectors_to_check = [
+            self.cfg.playwright['selectors']['css_anuncio1'],
+            self.cfg.playwright['selectors']['css_anuncio2']
+        ]
+        for idx, selector in enumerate(selectors_to_check, start=1):
+            try:
+                page.click(selector, timeout=5000)
+                page.wait_for_timeout(800) # Esperar un momento tras cerrar
+            except Exception as e:
+                print(f"Error al cerrar anuncio {idx} con selector '{selector}': {e}")
+        return browser, page
+
+    def _click_element(self, page, selectors: list, timeout: int = 5000):
+        """
+        Intenta hacer clic en un elemento usando una lista de selectores.
+        Retorna el selector que funcionó o lanza una excepción.
+        """
+        for selector in selectors:
+            try:
+                page.wait_for_selector(selector, state="visible", timeout=timeout).click()
+                print(f"✅ Clic exitoso con selector: '{selector}'")
+                return selector
+            except Exception as e:
+                print(f"❌ Fallo al hacer clic con selector '{selector}': {e}")
+        raise Exception(f"Fallo al hacer clic en todos los selectores proporcionados: {selectors}")
+
+    def download_excels(self, product_name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
         with sync_playwright() as playwright:
-            cfg = self.cfg
-            browser = playwright.chromium.launch(headless=True)  # headless=False para ver el navegador
-            #context = browser.new_context()
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/125.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 720}
-            )
-            page = context.new_page()
-            page.goto(cfg.url, timeout=30000)
-
-            # Esperar a que la página cargue completamente (útil en apps Angular como DIGEMID)
+            browser, page = self._get_page_and_handle_ads(playwright)
+            df01_raw = None
+            df02_raw = None
             try:
-                page.wait_for_load_state("networkidle", timeout=15000)  # Espera hasta que no haya peticiones por >1s
-                print("Página completamente cargada.")
+                # 1. Descargar el Excel de catálogo general
+                self._click_element(page, [
+                    self.cfg.playwright['selectors']['css_download_catalog'],
+                    self.cfg.playwright['selectors']['xpath_download_catalog']
+                ])
+                download = page.wait_for_event("download", timeout=20000) # Escucha del evento de descarga
+                os.makedirs(os.path.dirname(self.cfg.download_settings['catalog_excel']), exist_ok=True)
+                download.save_as(self.cfg.download_settings['catalog_excel'])
+                df01_raw = pd.read_excel(self.cfg.download_settings['catalog_excel'], header=0, dtype=str, keep_default_na=False)
+
+                # 2. Rellenar y buscar el producto en la misma página
+                page.fill(self.cfg.playwright['selectors']['search_input_product_name'], product_name)
+
+                # Manejo de la lista de autocompletado
+                # Espera la lista de sugerencias y haz clic en el primer elemento
+                page.wait_for_selector(self.cfg.playwright['selectors']['autocomplete_dropdown'], state="visible", timeout=10000)
+                page.wait_for_selector(self.cfg.playwright['selectors']['autocomplete_item02'], state="visible", timeout=5000)
+                page.click(self.cfg.playwright['selectors']['autocomplete_item02']) #Selecciona uno de la lista
+
+                # Espera a que el selector del botón de búsqueda se vuelva visible, devuelve un objeto Locator,
+                # cuando lo encuentra, hace clic inmediatamente
+                page.wait_for_selector(self.cfg.playwright['selectors']['search_button_product_name'], state="visible", timeout=3000).click()
+
+                # 3. Esperar y descargar el Excel del producto
+                # Espera a que el selector se vuelva visible, devuelve un objeto Locator, cuando lo encuentra, hace clic inmediatamente
+                page.wait_for_selector(self.cfg.playwright['selectors']['export_excel_product_name'], state="visible", timeout=10000).click()
+                download_product = page.wait_for_event("download", timeout=20000) # Escucha del evento de descarga
+                os.makedirs(os.path.dirname(self.cfg.download_settings['product_excel']), exist_ok=True)
+                download_product.save_as(self.cfg.download_settings['product_excel'])
+                df02_raw = pd.read_excel(self.cfg.download_settings['product_excel'], header=0, dtype=str, keep_default_na=False)
+                return df01_raw, df02_raw
+                
+            except TimeoutError:
+                # Si algún `wait_for_selector` o `wait_for_event` falla, se atrapa aquí.
+                print(f"❌ No se encontró el producto o el botón de descarga del Excel para '{product_name}'.")
+                return df01_raw, None
+
             except Exception as e:
-                print(f"Advertencia: La página no alcanzó 'networkidle' completamente: {e}")
-
-            # Cerrar anuncios de la página (OJO: ACTUALIZAR SELECTORES SI CAMBIA LOS ANUNCIOS)
-            for idx, selector in enumerate([cfg.css_anuncio1, cfg.css_anuncio2], start=1):
-                try:
-                    page.wait_for_selector(selector, timeout=5000)
-                    page.click(selector)
-                    print(f"Anuncio {idx} cerrado con selector: {selector}")
-                    page.wait_for_timeout(800)  # Esperar un momento tras cerrar
-                except Exception as e:
-                    print(f"Error al cerrar anuncio {idx} con selector '{selector}': {e}")
+                raise Exception(f"Fallo al descargar el Excel del producto: {e}")
             
-            # Haga clic en el botón de descarga usando el selector CSS o selector XPath
-            download_selector = None
-            download = None
-            for selector in [cfg.css_download, cfg.xpath_download]:
-                try:
-                    # Asegurarse de que el elemento es visible
-                    page.wait_for_selector(selector, state="visible", timeout=10000)
-                    # Iniciar escucha de descarga 
-                    with page.expect_download(timeout=20000) as download_info:
-                        # Hacer clic DENTRO del contexto
-                        page.click(selector)
-                    download = download_info.value
-                    download_selector = selector # El selector que funcionó
-                    print(f"Descarga iniciada con selector: {selector}")
-                    break
-                except Exception as e:
-                    print(f"Fallo con selector '{selector}': {e}")
-
-            if not download_selector:
-                raise Exception("No se pudo hacer clic en el botón de descarga")
-
-            # Asegurar que la carpeta exista y luego guardar el archivo descargado
-            download_dir = os.path.dirname(cfg.download_path)
-            os.makedirs(download_dir, exist_ok=True)
-            try:
-                download.save_as(cfg.download_path)
-                print(f"Archivo descargado y guardado en: {cfg.download_path}")
-            except Exception as e:
-                raise Exception(f"No se pudo guardar la descarga: {e}")
-            
-            browser.close()
-
-        # Leer el archivo Excel y convertirlo a DataFrame
-        # Detectar automáticamente el primer encabezado en la hoja
-        df_raw = pd.read_excel(cfg.download_path, header=0, dtype=str, keep_default_na=False)
-        return df_raw
+            finally:
+                browser.close()
 
 class ScrapyDownloader(IDownloader):
     def __init__(self, cfg):
         self.cfg = cfg
         self.session = requests.Session()
+        self.username = os.getenv("DIGEMID_USERNAME")
+        self.password = os.getenv("DIGEMID_PASSWORD")
 
-    def download_excel(self) -> pd.DataFrame:
+    def download_excels(self, product_name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
         self.session.headers.update({'User-Agent': 'MyScraper/0.1'})
-        resp = self.session.get(self.cfg.url, timeout=30)
-        resp.raise_for_status()
         
-        # Si la página tiene anuncios, intenta cerrarlos
+        # Inicia sesión y obtén el token
+        login_data = {'username': self.username, 'password': self.password}
+        response = self.session.post(self.cfg.scrapy['login_url'], json=login_data, timeout=30)
+        response.raise_for_status()
+        token = response.json().get('token')
+        if not token:
+            raise ValueError("No se pudo obtener el token de autenticación.")
+        
+        # Envía la solicitud POST para descargar el catálogo
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
+            'Origin': self.cfg.scrapy['origin_url'],
+            'Referer': self.cfg.scrapy['referer_url'],
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36'
+        }
+        data = {
+            'filtro': {
+                'situacion': 'ACT',
+                'tokenGoogle': token
+            }
+        }
+        
+        # Descarga el Excel de catálogo general
         try:
-            resp = self.session.get(self.cfg.css_anuncio1, timeout=30)
-            resp = self.session.get(self.cfg.css_anuncio2, timeout=30)
-        except requests.RequestException:
-            pass  # Si hay error al intentar cerrar el anuncio, se ignora
+            response = self.session.post(self.cfg.scrapy['download_excel_url'], headers=headers, json=data, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            raise ConnectionError(f"Error al descargar el archivo Excel: {e}")
+
+        df_general = pd.read_excel(BytesIO(response.content), dtype=str)
         
-        # Descarga el Excel
-        return pd.read_excel(BytesIO(resp.content), dtype=str)
+        # Filter the general DataFrame to simulate the product download for Scrapy
+        df_product = df_general[df_general['nombre_producto'].str.contains(product_name, case=False, na=False)]
+        
+        return df_general, df_product

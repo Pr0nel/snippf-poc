@@ -1,12 +1,25 @@
-import os
+# app/config.py
+import yaml
 from dataclasses import dataclass
 
 @dataclass
 class ScraperConfig:
-    url: str = os.getenv("DIGEMID_URL", "https://opm-digemid.minsa.gob.pe/#/consulta-producto")
-    css_download: str = os.getenv("CSS_DOWNLOAD", "body > app-root > app-consulta-productos-listar > div:nth-child(2) > div.card > div > div.centro.p-0.m-0 > a > span")
-    xpath_download: str = os.getenv("XPATH_DOWNLOAD", "xpath="+"/html/body/app-root/app-consulta-productos-listar/div[2]/div[2]/div/div[2]/a/span")
-    css_anuncio1: str = os.getenv("CSS_ANUNCIO1", "body > ngb-modal-window > div > div > app-modal-comunicacion > div.modal-footer.pr-3.pl-3 > button")
-    css_anuncio2: str = os.getenv("CSS_ANUNCIO2", "body > ngb-modal-window > div > div > app-modal-informativo-inicio > div.modal-footer.pr-3.pl-3 > button")
-    download_path: str = os.getenv("DOWNLOAD_PATH", "docs/catalogoproductos.xlsx")
+    env: str
+    product_name: str
+    download_settings: dict
+    playwright: dict
+    scrapy: dict
     
+    @classmethod
+    def from_yaml(cls, path: str):
+        with open(path, 'r') as f:
+            data = yaml.safe_load(f)
+        
+        # Mapea los datos del YAML a los atributos de la clase
+        return cls(
+            env             = data.get('env', 'dev'),
+            product_name    = data.get('product_name', None),
+            download_settings  = data.get('download_settings', {}),
+            playwright      = data.get('playwright', {}),
+            scrapy          = data.get('scrapy', {})
+        )

@@ -4,6 +4,8 @@ from app.adapters.downloader import PlaywrightDownloader, ScrapyDownloader
 from app.adapters.data_cleaner import DataFrameCleaner
 from app.adapters.scraper import DigemidScraper
 from app.config import ScraperConfig
+import os
+from dotenv import load_dotenv
 
 from fastapi import FastAPI
 from app.infra.db import get_session
@@ -58,19 +60,38 @@ def search(
 """
 
 def run_scraper():
-    cfg = ScraperConfig()
-    scraper = DigemidScraper(
-        downloader=PlaywrightDownloader(cfg),
-        #downloader = ScrapyDownloader(cfg),
-        cleaner=DataFrameCleaner()
-    )
-    df = scraper.download()
-    if df is not None:
-        print("✅ Scraping OK:")
-        print(df.head())
-    else:
-        print("❌ No se pudo descargar el archivo.")
+    load_dotenv() # carga variables de entorno desde el archivo .env
 
-# Punto de entrada
+    # Lee una variable de entorno para determinar el entorno
+    env = os.environ.get('ENV', 'dev') # Si no está definida, usa 'dev' por defecto
+    config_path = f'app/config_{env}.yml'
+
+    # Carga la configuración desde el archivo YAML
+    # Utiliza el método para leer y parsear el archivo de configuración
+    # y convertirlo en un objeto de tipo ScraperConfig
+    cfg = ScraperConfig.from_yaml(config_path)
+
+    # Inyección de dependencias
+    # En lugar de que DigemidScraper cree sus propias instancias de PlaywrightDownloader y DataFrameCleaner
+    # estas se le pasan a través del constructor
+    scraper = DigemidScraper(
+        downloader  = PlaywrightDownloader(cfg), # Se crea una instancia de la clase
+        cleaner     = DataFrameCleaner(), # Se crea una instancia de la clase
+        cfg         = cfg # Se pasa el objeto de configuración
+    )
+    df_general, df_producto = scraper.download(cfg.product_name) # Llama al método download() del objeto scraper
+    if df_general is not None:
+        print("✅ Descarga y limpieza del Catálogo General completada con éxito.")
+        print("\n--- Catalogo General (primeras 5 filas) ---")
+        print(df_general.head())
+    
+    if df_producto is not None:
+        print("✅ Descarga y limpieza de los Productos Buscados completada con éxito.")
+        print("\n--- Productos Buscados (primeras 5 filas) ---")
+        print(df_producto.head())
+
+    if df_general is None and df_producto is None:
+        print("❌ No se pudo descargar ningún archivo.")
+
 if __name__ == "__main__":
     run_scraper()

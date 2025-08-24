@@ -1,0 +1,34 @@
+# Configuración general para el entorno de producción
+env: "production"
+product_name: "ACIDO ZOLEDRONICO 4mg/5mL Inye"
+
+# Rutas de archivos y directorios
+download_settings:
+  catalog_excel: "docs/catalogoproductos.xlsx" # Usar rutas absolutas en producción
+  catalog_header_row: 6
+  product_excel: "docs/preciosProductos.xlsx" # Usar rutas absolutas en producción
+  product_header_row: 7
+
+# Configuración para Playwright
+playwright:
+  url: "https://opm-digemid.minsa.gob.pe/#/consulta-producto"
+  headless: True
+  selectors:
+    css_anuncio1: "body > ngb-modal-window > div > div > app-modal-comunicacion > div.modal-footer.pr-3.pl-3 > button"
+    css_anuncio2: "body > ngb-modal-window > div > div > app-modal-informativo-inicio > div.modal-footer.pr-3.pl-3 > button"
+    css_download_catalog: "body > app-root > app-consulta-productos-listar > div:nth-child(2) > div.card > div > div.centro.p-0.m-0 > a > span"
+    xpath_download_catalog: "xpath=/html/body/app-root/app-consulta-productos-listar/div[2]/div[2]/div/div[2]/a/span"
+    autocomplete_dropdown: "body > app-root > app-consulta-productos-listar > div:nth-child(2) > div.card > div > div.col-sm-12.p-1 > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > div.col-sm-6.col-md-6.col-lg-6 > ng-autocomplete > div.autocomplete-container.active > div.suggestions-container.is-visible"
+    autocomplete_item01: "body > app-root > app-consulta-productos-listar > div:nth-child(2) > div.card > div > div.col-sm-12.p-1 > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > div.col-sm-6.col-md-6.col-lg-6 > ng-autocomplete > div.autocomplete-container.active > div.suggestions-container.is-visible > ul > li:nth-child(1)"
+    autocomplete_item02: "body > app-root > app-consulta-productos-listar > div:nth-child(2) > div.card > div > div.col-sm-12.p-1 > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > div.col-sm-6.col-md-6.col-lg-6 > ng-autocomplete > div.autocomplete-container.active > div.suggestions-container.is-visible > ul > li:nth-child(2)"
+    autocomplete_item03: "body > app-root > app-consulta-productos-listar > div:nth-child(2) > div.card > div > div.col-sm-12.p-1 > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > div.col-sm-6.col-md-6.col-lg-6 > ng-autocomplete > div.autocomplete-container.active > div.suggestions-container.is-visible > ul > li:nth-child(3)"
+    search_input_product_name: "body > app-root > app-consulta-productos-listar > div:nth-child(2) > div.card > div > div.col-sm-12.p-1 > div:nth-child(2) > div:nth-child(1) > div:nth-child(1) > div.col-sm-6.col-md-6.col-lg-6 > ng-autocomplete > div > div.input-container > input"
+    search_button_product_name: "body > app-root > app-consulta-productos-listar > div:nth-child(2) > div.card > div > div.col-sm-12.p-1 > div:nth-child(2) > div:nth-child(1) > div:nth-child(3) > div:nth-child(2) > div > button"
+    export_excel_product_name: "body > app-root > app-consulta-productos-listar > div:nth-child(2) > div.row.wrapper > div > div > div.row.m-b-10 > div.col-sx-12.col-sm-6.col-md-2.ng-tns-c0-0.ng-star-inserted > button"
+
+# Configuración para ScrapyDownloader
+scrapy:
+  login_url: "https://opm-digemid.minsa.gob.pe/api/login"
+  download_excel_url: "https://ms-opm.minsa.gob.pe/msopmcovid/product/catalogoproductos"
+  origin_url: "https://opm-digemid.minsa.gob.pe"
+  referer_url: "https://opm-digemid.minsa.gob.pe/"
